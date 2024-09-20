@@ -1,0 +1,68 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+name: Publish Snapshot to Github Packages
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+env:
+  JDK_VERSION: 11
+  JDK_DISTRIBUTION: corretto
+  DISTRIBUTION_MANAGEMENT_XML: |
+    <distributionManagement>
+      <repository>
+        <id>github</id>
+        <name>GitHub Packages</name>
+        <url>https://maven.pkg.github.com/vishalwy/paimon</url>
+      </repository>
+      <snapshotRepository>
+        <id>github</id>
+        <name>GitHub Packages</name>
+        <url>https://maven.pkg.github.com/vishalwy/paimon</url>
+      </snapshotRepository>
+    </distributionManagement>
+  PATCH_SUFFIX: TEST0
+
+jobs:
+  publish-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up JDK ${{ env.JDK_DISTRIBUTION }} ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: ${{ env.JDK_DISTRIBUTION }}
+      - name: Patch pom
+        run: |
+          perl -0777 -i -pe 's|</scm>|</scm>\n\n$ENV{DISTRIBUTION_MANAGEMENT_XML}|g' pom.xml
+          project_version=$(mvn -q exec:exec -Dexec.executable="echo" -Dexec.args='${project.version}' --non-recursive)
+          patched_project_version=$(echo ${project_version} | sed -E "s/(-SNAPSHOT)?\$/-${PATCH_SUFFIX}&/")
+          mvn -B versions:set -DnewVersion="${patched_project_version}" -DgenerateBackupPoms=false
+      - name: Publish snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mvn -B clean deploy -Dgpg.skip -Drat.skip -DskipTests
